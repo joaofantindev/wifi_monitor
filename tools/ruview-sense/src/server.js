@@ -15,6 +15,49 @@ import { defaultRoom, addObstacle, removeObstacle } from "./room.js";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MONITOR = join(HERE, "monitor.html");
 
+const MODULE_DEFAULTS = Object.freeze({
+  presence: true,
+  motion: true,
+  count: true,
+  vitals: true,
+  envChange: true,
+});
+
+// Detection modules shown as toggles in the dashboard. Disabled ones are
+// zeroed out of the published state (the pipeline still computes them, but
+// the monitor/3D stop reporting them).
+function applyModules(raw, active) {
+  const out = { ...raw, modules: { ...active } };
+  if (!active.presence) {
+    out.present = false;
+    out.presenceScore = 0;
+  }
+  if (!active.motion) {
+    out.motion = false;
+    out.motionEnergy = 0;
+  }
+  if (!active.count) {
+    out.persons = null;
+    out.personsGrade = null;
+  }
+  if (!active.vitals) out.vitals = null;
+  if (!active.envChange) out.environmentChanged = false;
+  return out;
+}
+
+// RF shadow map constants: real measured attenuation of the WiFi signal across
+// the room. One 802.11 node cannot triangulate obstacle positions, but while
+// the user walks the room and clicks their position on the floor, each sample
+// records how much the live signal dips vs. the idle baseline — furniture and
+// bodies cast measurable RF shadows that render as a detailed 3D volume.
+const MAP_STEP = 0.25;
+const MAP_COLS = Math.round(8 / MAP_STEP);
+const MAP_ROWS = Math.round(4 / MAP_STEP);
+
+function round1(x) {
+  return Math.round(x * 10) / 10;
+}
+
 export function startServer(opts = {}) {
   const source = opts.source ?? "auto";
   const udpPort = opts.udpPort ?? 5005;
@@ -25,6 +68,58 @@ export function startServer(opts = {}) {
 
   const pipeline = new SensePipeline(opts.pipeline ?? {});
   let room = defaultRoom();
+
+  // Per-server RF shadow map session (startServer is reusable in tests).
+  const mapSession = {
+    active: false,
+    step: MAP_STEP,
+    cols: MAP_COLS,
+    rows: MAP_ROWS,
+    rssiBaseline: null,
+    cells: new Map(), // "cx,cz" -> { x, z, dip, n }
+  };
+
+  function mapSample(x, z) {
+    const cx = Math.round(x / MAP_STEP);
+    const cz = Math.round(z / MAP_STEP);
+    if (cx < 0 || cx >= MAP_COLS || cz < 0 || cz >= MAP_ROWS) return null;
+    const key = `${cx},${cz}`;
+    const now = rawLast.rssiDbm;
+    const rssiDip = Number.isFinite(now) ? Math.max(0, (mapSession.rssiBaseline ?? now) - now) : 0;
+    const activity = Number.isFinite(rawLast.rawDelta) ? Math.min(3, rawLast.rawDelta * 40) : 0;
+    const shadow = rssiDip + activity;
+    const prev = mapSession.cells.get(key);
+    const cell = prev
+      ? { ...prev, dip: Math.max(prev.dip, shadow), n: prev.n + 1 }
+      : { x: round1(cx * MAP_STEP), z: round1(cz * MAP_STEP), dip: round1(shadow * 2) / 2, n: 1 };
+    mapSession.cells.set(key, cell);
+    return cell;
+  }
+
+  function mapList() {
+    return {
+      active: mapSession.active,
+      step: mapSession.step,
+      cols: mapSession.cols,
+      rows: mapSession.rows,
+      rssiBaseline: mapSession.rssiBaseline,
+      cells: [...mapSession.cells.values()],
+    };
+  }
+
+  function seedDemoMap() {
+    mapSession.active = true;
+    mapSession.cells.clear();
+    const put = (x, z, dip) => {
+      const cx = Math.round(x / MAP_STEP);
+      const cz = Math.round(z / MAP_STEP);
+      mapSession.cells.set(`${cx},${cz}`, { x: round1(x), z: round1(z), dip, n: 8 });
+    };
+    for (let x = 1.5; x <= 3.6; x += 0.25) for (let z = 2.4; z <= 3.4; z += 0.25) put(x, z, 2.2 + ((x - 1.5) % 0.75) * 0.3);
+    for (let x = 5.9; x <= 7.0; x += 0.25) for (let z = 0.6; z <= 1.4; z += 0.3) put(x, z, 1.7);
+    for (let x = 0.25; x < 7.9; x += 0.25) put(x, 0.15, 2.8);
+    mapSession.rssiBaseline = -54;
+  }
 
   function readBody(req) {
     return new Promise((resolve, reject) => {
@@ -46,24 +141,33 @@ export function startServer(opts = {}) {
     res.end(JSON.stringify(value));
   }
   const clients = new Set();
-  let last = {
+  let activeModules = { ...MODULE_DEFAULTS };
+  let rawLast = {
     source,
     status: "starting",
     present: false,
     motion: false,
     messages: [],
   };
+  let last = applyModules(rawLast, activeModules);
   let csiPackets = 0;
   let gotEsp32 = false;
   let activeSource = source;
 
   function note(message) {
-    last.messages = [message, ...last.messages].slice(0, 40);
+    rawLast.messages = [message, ...rawLast.messages].slice(0, 40);
+    last.messages = rawLast.messages;
     if (log) console.log(`[ruview-sense] ${message}`);
   }
 
   function publish(state) {
-    last = { ...last, ...state, status: activeSource };
+    rawLast = { ...rawLast, ...state, status: activeSource };
+    if (mapSession.active && Number.isFinite(rawLast.rssiDbm) && rawLast.motion === false) {
+      // Keep an idle RSSI baseline while a sweep map session is active.
+      const b = mapSession.rssiBaseline;
+      mapSession.rssiBaseline = b == null ? rawLast.rssiDbm : b * 0.95 + rawLast.rssiDbm * 0.05;
+    }
+    last = applyModules(rawLast, activeModules);
   }
 
   // --- UDP intake (ESP32 ADR-018) ---
@@ -203,6 +307,59 @@ export function startServer(opts = {}) {
       });
       return;
     }
+    if (url.pathname === "/api/v1/modules") {
+      if (req.method === "POST") {
+        try {
+          const body = await readBody(req);
+          for (const k of Object.keys(MODULE_DEFAULTS)) {
+            if (typeof body[k] === "boolean") activeModules[k] = body[k];
+          }
+        } catch {
+          /* malformed JSON: keep current modules */
+        }
+        publish({});
+      }
+      json(res, 200, { ...last.modules });
+      return;
+    }
+    if (url.pathname === "/api/v1/map") {
+      const action = url.searchParams.get("action");
+      if (req.method === "POST" && action === "start") {
+        mapSession.active = true;
+        mapSession.cells.clear();
+        mapSession.rssiBaseline = null;
+        note("RF shadow map: ande pela sala e clique, no chão, onde você estiver");
+      } else if (req.method === "POST" && action === "stop") {
+        mapSession.active = false;
+        note("RF shadow map stopped");
+      } else if (req.method === "POST" && action === "clear") {
+        mapSession.cells.clear();
+      }
+      publish({ mapping: mapSession.active });
+      json(res, 200, mapList());
+      return;
+    }
+    if (url.pathname === "/api/v1/map/sample" && req.method === "POST") {
+      try {
+        const body = await readBody(req);
+        const cell = mapSample(Number(body.x), Number(body.z));
+        publish({});
+        json(res, cell ? 200 : 400, cell ?? { error: "out-of-room" });
+      } catch {
+        json(res, 400, { error: "body.invalid-json" });
+      }
+      return;
+    }
+    if (url.pathname === "/api/v1/map/demo" && req.method === "POST") {
+      if (activeSource !== "simulated") {
+        json(res, 403, { error: "demo-only-on-simulated" });
+        return;
+      }
+      seedDemoMap();
+      publish({ mapping: true });
+      json(res, 200, mapList());
+      return;
+    }
     if (url.pathname === "/api/v1/sense") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(last));
@@ -228,6 +385,17 @@ export function startServer(opts = {}) {
       } catch {
         res.writeHead(500);
         res.end("monitor.html missing");
+      }
+      return;
+    }
+    if (url.pathname === "/view3d.js") {
+      try {
+        const js = await readFile(join(HERE, "view3d.js"));
+        res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
+        res.end(js);
+      } catch {
+        res.writeHead(500);
+        res.end("view3d.js missing");
       }
       return;
     }

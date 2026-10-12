@@ -6,118 +6,182 @@
   <title>ruview-sense — monitor</title>
   <style>
     :root {
-      --bg: #0d1117;
-      --panel: #161b22;
-      --fg: #e6edf3;
-      --muted: #8b949e;
-      --green: #3fb950;
-      --red: #f85149;
-      --amber: #d29922;
-      --blue: #58a6ff;
+      --paper: #ffffff;
+      --panel: #fafafa;
+      --ink: #111111;
+      --gray: #666666;
+      --line: #111111;
+      --line2: #d0d0d0;
+      --red: #d00000;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font: 15px/1.45 system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--fg);
-      padding: 24px;
+      font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      padding: 28px 24px;
+      -webkit-font-smoothing: antialiased;
     }
-    h1 { font-size: 18px; margin: 0 0 4px; }
-    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
-    .bar { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
-    .source { font-weight: 600; padding: 2px 10px; border-radius: 999px; font-size: 13px; }
-    .source.live { background: rgba(63,185,80,.15); color: var(--green); }
-    .source.simulated { background: rgba(242,81,73,.15); color: var(--red); }
-    .source.rssi { background: rgba(210,153,34,.15); color: var(--amber); }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
-    .card { background: var(--panel); border: 1px solid #21262d; border-radius: 10px; padding: 14px 16px; }
-    .card .label { color: var(--muted); font-size: 12px; }
-    .card .value { font-size: 26px; font-weight: 650; margin-top: 2px; }
-    .ok { color: var(--green); }
-    .bad { color: var(--red); }
-    .warn { color: var(--amber); }
-    .info { color: var(--blue); }
-    .muted { color: var(--muted); font-size: 12px; }
-    .note { margin-top: 16px; padding: 10px 12px; border-left: 3px solid var(--amber); background: #1c2128; font-size: 12px; color: var(--muted); }
-    #conn { font-size: 12px; color: var(--muted); }
+    header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-bottom: 3px solid var(--ink); padding-bottom: 14px; margin-bottom: 18px; }
+    h1 { font-size: 20px; margin: 0 0 2px; letter-spacing: .02em; }
+    h1 .accent { color: var(--red); }
+    h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .14em; color: var(--ink); margin: 0 0 10px; border-bottom: 1px solid var(--line2); padding-bottom: 6px; }
+    .sub { color: var(--gray); font-size: 12px; }
+    .source { font-weight: 700; padding: 3px 12px; border: 2px solid var(--ink); font-size: 12px; letter-spacing: .08em; }
+    .source.live { background: var(--ink); color: var(--paper); }
+    .source.simulated { border-color: var(--red); color: var(--red); }
+    .source.rssi { border-color: var(--gray); color: var(--gray); }
+    .gutter { text-align: right; font-size: 12px; color: var(--gray); }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0; border: 2px solid var(--ink); margin-bottom: 22px; }
+    .card { padding: 12px 14px; border-right: 1px solid var(--line2); border-bottom: 1px solid var(--line2); background: var(--panel); }
+    .card .label { color: var(--gray); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+    .card .value { font-size: 26px; font-weight: 750; margin-top: 2px; color: var(--ink); font-variant-numeric: tabular-nums; }
+    .card .value.on { color: var(--red); }
+    .muted { color: var(--gray); font-size: 12px; }
+
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 0 0 8px; }
+    .controls button {
+      background: var(--paper); color: var(--ink); border: 2px solid var(--ink);
+      padding: 5px 12px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
+    }
+    .controls button:hover { background: var(--ink); color: var(--paper); }
+    .controls button.active, .controls button.on { background: var(--red); border-color: var(--red); color: var(--paper); }
+    #room-canvas { width: 100%; height: 420px; background: #f5f5f5; border: 2px solid var(--ink); display: block; touch-action: none; }
+    #place-hint { font-size: 12px; color: var(--gray); font-style: italic; }
+
+    .note { margin-top: 18px; padding: 12px 14px; border: 2px solid var(--ink); font-size: 12.5px; color: var(--ink); background: var(--panel); }
+    .note b.red { color: var(--red); }
   </style>
 </head>
 <body>
-  <div class="bar">
+  <header>
     <div>
-      <h1>ruview-sense</h1>
-      <div class="muted">presença / movimento / contagem / vitais (heurísticas rotuladas)</div>
+      <h1>ruview<span class="accent">-sense</span></h1>
+      <div class="sub">presença · movimento · contagem · vitais — RF, sem câmera (heurísticas rotuladas)</div>
     </div>
-    <div style="text-align:right">
+    <div class="gutter">
       <span id="source" class="source">…</span><br>
       <span id="conn">conectando…</span>
     </div>
-  </div>
+  </header>
 
   <div class="grid">
-    <div class="card"><div class="label">Presença</div><div id="presence" class="value muted">—</div><div id="presenceScore" class="muted"></div></div>
-    <div class="card"><div class="label">Movimento</div><div id="motion" class="value muted">—</div><div id="motionEnergy" class="muted"></div></div>
-    <div class="card"><div class="label">Pessoas (heurística)</div><div id="persons" class="value muted">—</div><div id="personsGrade" class="muted"></div></div>
-    <div class="card"><div class="label">Mudança no ambiente</div><div id="env" class="value muted">—</div><div class="muted">objeto movido/novo? (não classifica)</div></div>
-    <div class="card"><div class="label">Respiração (BPM)</div><div id="breathing" class="value muted">—</div><div id="breathingGrade" class="muted"></div></div>
-    <div class="card"><div class="label">Batimentos (BPM)</div><div id="heart" class="value muted">—</div><div id="heartGrade" class="muted"></div></div>
-    <div class="card"><div class="label">RSSI (dBm)</div><div id="rssi" class="value muted">—</div></div>
-    <div class="card"><div class="label">Frames recebidos</div><div id="frames" class="value muted">0</div></div>
+    <div class="card"><div class="label">Presença</div><div id="presence" class="value">—</div><div class="muted" id="presenceScore"></div></div>
+    <div class="card"><div class="label">Movimento</div><div id="motion" class="value">—</div><div class="muted" id="motionEnergy"></div></div>
+    <div class="card"><div class="label">Pessoas (heurística)</div><div id="persons" class="value">—</div><div class="muted" id="personsGrade"></div></div>
+    <div class="card"><div class="label">Ambiente</div><div id="env" class="value">—</div><div class="muted">objeto movido/novo? (não classifica)</div></div>
+    <div class="card"><div class="label">Respiração (BPM)</div><div id="breathing" class="value">—</div><div class="muted" id="breathingGrade"></div></div>
+    <div class="card"><div class="label">Batimentos (BPM)</div><div id="heart" class="value">—</div><div class="muted" id="heartGrade"></div></div>
+    <div class="card"><div class="label">RSSI (dBm)</div><div id="rssi" class="value">—</div></div>
+    <div class="card"><div class="label">Frames</div><div id="frames" class="value">0</div></div>
+    <div class="card"><div class="label">Mudança bruta RF</div><div id="raw" class="value">—</div><div class="muted">variação do sinal por frame</div></div>
+    <div class="card"><div class="label">Sensibilidade</div><div id="sens" class="value">normal</div></div>
+  </div>
+
+  <h2>Módulos de detecção</h2>
+  <div class="controls" id="modules">
+    <span class="muted">ativo:&nbsp;&nbsp;</span>
+  </div>
+
+  <div class="room3d">
+    <h2>Ambiente 3D — ponto WiFi, planta e sombras RF medidas</h2>
+    <div class="controls">
+      <button id="btn-wall">+ parede</button>
+      <button id="btn-box">+ objeto</button>
+      <button id="btn-remove">remover último</button>
+      <button id="btn-reset">limpar planta</button>
+      <button id="btn-map">Mapear (sombra RF real)</button>
+      <button id="btn-map-demo">demo simulada</button>
+      <button id="btn-sensitivity">Sensibilidade</button>
+      <span id="place-hint" class="muted"></span>
+    </div>
+    <canvas id="room-canvas" width="640" height="420"></canvas>
   </div>
 
   <div class="note" id="note"></div>
 
   <script>
     const $ = (id) => document.getElementById(id);
-    const fmt = (v, d = 2) => (v === null || v === undefined) ? "—" : Number(v).toFixed?.(d) ?? v;
+    const fmt = (v, d = 2) => (v === null || v === undefined) ? "—" : (typeof v === "number" ? v.toFixed(d) : v);
+    const badge = (g) => g ? `<span class="muted">${g}</span>` : "";
 
-    function gradeBadge(g) {
-      if (!g) return "";
-      const cls = g.includes("device-reported") ? "info" : g.includes("estimated") || g.includes("heuristic") ? "warn" : "muted";
-      return `<span class="${cls} muted">${g}</span>`;
+    const MODULES = [
+      ["presence", "presença"],
+      ["motion", "movimento"],
+      ["count", "contagem"],
+      ["vitals", "vitais"],
+      ["envChange", "ambiente"],
+    ];
+    for (const [key, label] of MODULES) {
+      const b = document.createElement("button");
+      b.id = "mod-" + key;
+      b.textContent = label;
+      b.dataset.role = "module";
+      b.style.marginRight = "4px";
+      $("modules").appendChild(b);
+      b.addEventListener("click", async () => {
+        const cur = await (await fetch("/api/v1/modules")).json();
+        const next = { ...cur, [key]: !cur[key] };
+        await fetch("/api/v1/modules", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(next),
+        });
+        const state = await (await fetch("/api/v1/sense")).json();
+        paint(state);
+      });
+    }
+
+    function paint(s) {
+      window.__lastSense = s;
+      const live = s.source === "esp32";
+      const sim = s.source === "simulated";
+      const rssi = s.source === "rssi";
+      $("source").textContent = { esp32: "LIVE · ESP32 CSI", simulated: "SIMULATED", rssi: "RSSI (grosseiro)" }[s.source] ?? s.source;
+      $("source").className = "source " + (live ? "live" : sim ? "simulated" : rssi ? "rssi" : "");
+
+      setVal("presence", s.present === true ? "SIM" : "NÃO", s.present === true);
+      $("presenceScore").textContent = "score " + fmt(s.presenceScore, 3);
+      setVal("motion", s.motion === true ? "SIM" : "NÃO", s.motion === true);
+      $("motionEnergy").textContent = "energia " + fmt(s.motionEnergy, 4);
+      setVal("persons", s.persons ?? "—", s.persons != null);
+      $("personsGrade").innerHTML = badge(s.personsGrade);
+      setVal("env", s.environmentChanged ? "MUDOU" : "estável", s.environmentChanged);
+      const v = s.vitals;
+      setVal("breathing", v && v.breathingBpm != null ? fmt(v.breathingBpm, 1) : "—", v && v.breathingBpm != null);
+      $("breathingGrade").innerHTML = badge(v && v.grade);
+      setVal("heart", v && v.heartBpm != null ? fmt(v.heartBpm, 1) : "—", v && v.heartBpm != null);
+      $("heartGrade").innerHTML = badge(v && v.grade);
+      $("rssi").textContent = s.rssiDbm != null ? s.rssiDbm + " · " + (s.bssids ?? 1) + " pts" : "—";
+      $("frames").textContent = s.frames ?? 0;
+      setVal("raw", s.rawDelta != null ? fmt(s.rawDelta, 5) : "—", Number(s.rawDelta ?? 0) > 0);
+      setVal("sens", s.sensitivity === "high" ? "EXTREMA" : "normal", s.sensitivity === "high");
+      if (s.modules) for (const [key] of MODULES) {
+        const b = $("mod-" + key);
+        b.classList.toggle("on", !!s.modules[key]);
+      }
+    }
+    function setVal(id, text, on) {
+      const el = $(id);
+      el.textContent = text;
+      el.className = "value" + (on ? " on" : "");
     }
 
     const es = new EventSource("/events");
     es.onmessage = (e) => {
-      const s = JSON.parse(e.data);
-      const live = s.source === "esp32";
-      const sim = s.source === "simulated";
-      const rssi = s.source === "rssi";
-
-      $("source").textContent = { esp32: "LIVE · ESP32 CSI", simulated: "SIMULATED DATA", rssi: "RSSI (grosseiro)" }[s.source] ?? s.source;
-      $("source").className = "source " + (live ? "live" : sim ? "simulated" : rssi ? "rssi" : "");
-
-      $("presence").textContent = s.present ? "SIM" : "NÃO";
-      $("presence").className = "value " + (s.present ? "ok" : "muted");
-      $("presenceScore").textContent = "score " + fmt(s.presenceScore, 3);
-
-      $("motion").textContent = s.motion ? "SIM" : "NÃO";
-      $("motion").className = "value " + (s.motion ? "warn" : "muted");
-      $("motionEnergy").textContent = "energia " + fmt(s.motionEnergy, 4);
-
-      $("persons").textContent = s.persons ?? "—";
-      $("personsGrade").innerHTML = gradeBadge(s.personsGrade);
-
-      $("env").textContent = s.environmentChanged ? "MUDOU" : "estável";
-      $("env").className = "value " + (s.environmentChanged ? "bad" : "muted");
-
-      const v = s.vitals;
-      $("breathing").textContent = v && v.breathingBpm != null ? fmt(v.breathingBpm, 1) : "—";
-      $("breathingGrade").innerHTML = gradeBadge(v && v.grade);
-      $("heart").textContent = v && v.heartBpm != null ? fmt(v.heartBpm, 1) : "—";
-      $("heartGrade").innerHTML = gradeBadge(v && v.grade);
-
-      $("rssi").textContent = s.rssiDbm != null ? s.rssiDbm + " · " + (s.bssids ?? 1) + " pontos" : "—";
-      $("frames").textContent = s.frames ?? 0;
+      try { paint(JSON.parse(e.data)); } catch { /* ignore malformed */ }
     };
-    es.onopen = () => { $("conn").textContent = "conectado"; $("conn").style.color = "var(--green)"; };
-    es.onerror = () => { $("conn").textContent = "reconectando…"; $("conn").style.color = "var(--amber)"; };
+    es.onopen = () => { $("conn").textContent = "conectado"; $("conn").style.color = "var(--red)"; };
+    es.onerror = () => { $("conn").textContent = "reconectando…"; $("conn").style.color = "var(--gray)"; };
 
     $("note").innerHTML =
-      "<b>Leia com honestidade:</b> contagem é <b>heurística</b> (diversidade de subportadoras, não pessoas reais); " +
-      "vitais do pacote ESP32 são <i>device-reported, não validados</i>, e a estimativa local é heurística; " +
-      "RSSI (sem ESP32) só dá presença/movimento grosseiros; mudança de ambiente não classifica o objeto.";
+      "<b class='red'>Leia com honestidade:</b> contagem é <b>heurística</b> (não é contagem real); " +
+      "vitais do ESP32 são <i>device-reported, não validados</i>; RSSI (sem ESP32) só dá presença/movimento grosseiros; " +
+      "<b>sombra RF</b> mede atenução real do WiFi vs. linha de base (andar pela sala clicando no chão), mas não identifica objetos — " +
+      "um único nó não triangula a posição dos móveis."
   </script>
+  <script type="module" src="/view3d.js"></script>
 </body>
 </html>
