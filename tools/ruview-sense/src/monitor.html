@@ -6,53 +6,72 @@
   <title>ruview-sense — monitor</title>
   <style>
     :root {
-      --paper: #ffffff;
-      --panel: #fafafa;
-      --ink: #111111;
-      --gray: #666666;
-      --line: #111111;
-      --line2: #d0d0d0;
-      --red: #d00000;
+      --bg: #07090b;
+      --panel: #0c1013;
+      --ink: #e8f1e8;
+      --gray: #6d7f6d;
+      --line: #25332a;
+      --green: #3dff6e;
+      --red: #ff3333;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
-      background: var(--paper);
+      font: 14px/1.5 ui-monospace, "JetBrains Mono", "Fira Code", "Cascadia Mono", "IBM Plex Mono", Consolas, monospace;
+      background: var(--bg);
       color: var(--ink);
-      padding: 28px 24px;
-      -webkit-font-smoothing: antialiased;
+      padding: 26px 22px;
+      position: relative;
     }
-    header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-bottom: 3px solid var(--ink); padding-bottom: 14px; margin-bottom: 18px; }
-    h1 { font-size: 20px; margin: 0 0 2px; letter-spacing: .02em; }
-    h1 .accent { color: var(--red); }
-    h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .14em; color: var(--ink); margin: 0 0 10px; border-bottom: 1px solid var(--line2); padding-bottom: 6px; }
+    body::after {
+      content: "";
+      position: fixed; inset: 0; pointer-events: none; z-index: 9;
+      background: repeating-linear-gradient(0deg, rgba(0,0,0,.22) 0 1px, transparent 1px 3px);
+    }
+    body::before {
+      content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 9;
+      background: radial-gradient(ellipse at center, transparent 62%, rgba(0,0,0,.5) 100%);
+    }
+    header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 18px; }
+    h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: .06em; text-transform: uppercase; }
+    h1 .accent { color: var(--red); text-shadow: 0 0 12px rgba(255,51,51,.55); }
+    h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .18em; color: var(--green); margin: 0 0 10px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
     .sub { color: var(--gray); font-size: 12px; }
-    .source { font-weight: 700; padding: 3px 12px; border: 2px solid var(--ink); font-size: 12px; letter-spacing: .08em; }
-    .source.live { background: var(--ink); color: var(--paper); }
-    .source.simulated { border-color: var(--red); color: var(--red); }
+    .source { font-weight: 700; padding: 3px 10px; border: 1px solid var(--line); color: var(--gray); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; }
+    .source.live { border-color: var(--green); color: var(--green); text-shadow: 0 0 8px rgba(61,255,110,.6); }
+    .source.simulated { border-color: var(--red); color: var(--red); text-shadow: 0 0 8px rgba(255,51,51,.6); animation: blinker 1.1s steps(2, start) infinite; }
     .source.rssi { border-color: var(--gray); color: var(--gray); }
     .gutter { text-align: right; font-size: 12px; color: var(--gray); }
 
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0; border: 2px solid var(--ink); margin-bottom: 22px; }
-    .card { padding: 12px 14px; border-right: 1px solid var(--line2); border-bottom: 1px solid var(--line2); background: var(--panel); }
-    .card .label { color: var(--gray); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 22px; }
+    .card { padding: 12px 14px; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; }
+    .card .label { color: var(--green); font-size: 10px; text-transform: uppercase; letter-spacing: .12em; }
     .card .value { font-size: 26px; font-weight: 750; margin-top: 2px; color: var(--ink); font-variant-numeric: tabular-nums; }
-    .card .value.on { color: var(--red); }
-    .muted { color: var(--gray); font-size: 12px; }
+    .card .value.on { color: var(--green); text-shadow: 0 0 12px rgba(61,255,110,.5); }
+    .card .value.warn { color: var(--red); text-shadow: 0 0 12px rgba(255,51,51,.5); }
+    .muted { color: var(--gray); font-size: 11px; }
 
     .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 0 0 8px; }
     .controls button {
-      background: var(--paper); color: var(--ink); border: 2px solid var(--ink);
-      padding: 5px 12px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
+      background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+      padding: 6px 12px; font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit;
+      text-transform: uppercase; letter-spacing: .06em;
     }
-    .controls button:hover { background: var(--ink); color: var(--paper); }
-    .controls button.active, .controls button.on { background: var(--red); border-color: var(--red); color: var(--paper); }
-    #room-canvas { width: 100%; height: 420px; background: #f5f5f5; border: 2px solid var(--ink); display: block; touch-action: none; }
+    .controls button:hover { border-color: var(--green); color: var(--green); box-shadow: 0 0 10px rgba(61,255,110,.25); }
+    .controls button.active, .controls button.on { background: rgba(255,51,51,.12); border-color: var(--red); color: var(--red); text-shadow: 0 0 8px rgba(255,51,51,.6); }
+    #room-wrap { position: relative; }
+    #room-canvas { width: 100%; height: 420px; background: #07090b; border: 1px solid var(--line); border-radius: 6px; display: block; touch-action: none; }
+    #room-status {
+      position: absolute; top: 10px; left: 12px; pointer-events: none;
+      color: var(--green); font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+      text-shadow: 0 0 8px rgba(61,255,110,.6); animation: blinker 1.2s steps(2, start) infinite;
+    }
     #place-hint { font-size: 12px; color: var(--gray); font-style: italic; }
+    @keyframes blinker { 50% { opacity: 0; } }
 
-    .note { margin-top: 18px; padding: 12px 14px; border: 2px solid var(--ink); font-size: 12.5px; color: var(--ink); background: var(--panel); }
+    .note { margin-top: 18px; padding: 12px 14px; border: 1px solid var(--line); font-size: 12px; color: var(--gray); background: var(--panel); border-radius: 6px; }
     .note b.red { color: var(--red); }
+    .note b.green { color: var(--green); }
   </style>
 </head>
 <body>
@@ -86,7 +105,7 @@
   </div>
 
   <div class="room3d">
-    <h2>Ambiente 3D — ponto WiFi, planta e sombras RF medidas</h2>
+    <h2>Ambiente 3D (WebGL) — ponto WiFi, planta e sombras RF medidas</h2>
     <div class="controls">
       <button id="btn-wall">+ parede</button>
       <button id="btn-box">+ objeto</button>
@@ -97,7 +116,10 @@
       <button id="btn-sensitivity">Sensibilidade</button>
       <span id="place-hint" class="muted"></span>
     </div>
-    <canvas id="room-canvas" width="640" height="420"></canvas>
+    <div id="room-wrap">
+      <div id="room-status"></div>
+      <canvas id="room-canvas" width="640" height="420"></canvas>
+    </div>
   </div>
 
   <div class="note" id="note"></div>
@@ -142,45 +164,46 @@
       $("source").textContent = { esp32: "LIVE · ESP32 CSI", simulated: "SIMULATED", rssi: "RSSI (grosseiro)" }[s.source] ?? s.source;
       $("source").className = "source " + (live ? "live" : sim ? "simulated" : rssi ? "rssi" : "");
 
-      setVal("presence", s.present === true ? "SIM" : "NÃO", s.present === true);
+      setVal("presence", s.present === true ? "SIM" : "NÃO", s.present === true ? "on" : "");
       $("presenceScore").textContent = "score " + fmt(s.presenceScore, 3);
-      setVal("motion", s.motion === true ? "SIM" : "NÃO", s.motion === true);
+      setVal("motion", s.motion === true ? "SIM" : "NÃO", s.motion === true ? "on" : "");
       $("motionEnergy").textContent = "energia " + fmt(s.motionEnergy, 4);
-      setVal("persons", s.persons ?? "—", s.persons != null);
+      setVal("persons", s.persons ?? "—", s.persons != null ? "on" : "");
       $("personsGrade").innerHTML = badge(s.personsGrade);
-      setVal("env", s.environmentChanged ? "MUDOU" : "estável", s.environmentChanged);
+      setVal("env", s.environmentChanged ? "MUDOU" : "estável", s.environmentChanged ? "warn" : "");
       const v = s.vitals;
-      setVal("breathing", v && v.breathingBpm != null ? fmt(v.breathingBpm, 1) : "—", v && v.breathingBpm != null);
+      setVal("breathing", v && v.breathingBpm != null ? fmt(v.breathingBpm, 1) : "—", v && v.breathingBpm != null ? "on" : "");
       $("breathingGrade").innerHTML = badge(v && v.grade);
-      setVal("heart", v && v.heartBpm != null ? fmt(v.heartBpm, 1) : "—", v && v.heartBpm != null);
+      setVal("heart", v && v.heartBpm != null ? fmt(v.heartBpm, 1) : "—", v && v.heartBpm != null ? "on" : "");
       $("heartGrade").innerHTML = badge(v && v.grade);
       $("rssi").textContent = s.rssiDbm != null ? s.rssiDbm + " · " + (s.bssids ?? 1) + " pts" : "—";
       $("frames").textContent = s.frames ?? 0;
-      setVal("raw", s.rawDelta != null ? fmt(s.rawDelta, 5) : "—", Number(s.rawDelta ?? 0) > 0);
-      setVal("sens", s.sensitivity === "high" ? "EXTREMA" : "normal", s.sensitivity === "high");
+      setVal("raw", s.rawDelta != null ? fmt(s.rawDelta, 5) : "—", Number(s.rawDelta ?? 0) > 0 ? "on" : "");
+      setVal("sens", s.sensitivity === "high" ? "EXTREMA" : "normal", s.sensitivity === "high" ? "warn" : "");
       if (s.modules) for (const [key] of MODULES) {
         const b = $("mod-" + key);
         b.classList.toggle("on", !!s.modules[key]);
       }
     }
-    function setVal(id, text, on) {
+    function setVal(id, text, mode) {
       const el = $(id);
       el.textContent = text;
-      el.className = "value" + (on ? " on" : "");
+      el.className = "value" + (mode ? " " + mode : "");
     }
 
     const es = new EventSource("/events");
     es.onmessage = (e) => {
       try { paint(JSON.parse(e.data)); } catch { /* ignore malformed */ }
     };
-    es.onopen = () => { $("conn").textContent = "conectado"; $("conn").style.color = "var(--red)"; };
+    es.onopen = () => { $("conn").textContent = "conectado"; $("conn").style.color = "var(--green)"; };
     es.onerror = () => { $("conn").textContent = "reconectando…"; $("conn").style.color = "var(--gray)"; };
 
     $("note").innerHTML =
       "<b class='red'>Leia com honestidade:</b> contagem é <b>heurística</b> (não é contagem real); " +
       "vitais do ESP32 são <i>device-reported, não validados</i>; RSSI (sem ESP32) só dá presença/movimento grosseiros; " +
       "<b>sombra RF</b> mede atenução real do WiFi vs. linha de base (andar pela sala clicando no chão), mas não identifica objetos — " +
-      "um único nó não triangula a posição dos móveis."
+      "um único nó não triangula a posição dos móveis. " +
+      "A vista 3D é WebGL (Three.js): voxels instanciados das sombras RF, atualizada a cada 500 ms."
   </script>
   <script type="module" src="/view3d.js"></script>
 </body>

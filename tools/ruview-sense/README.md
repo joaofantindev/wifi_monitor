@@ -43,18 +43,20 @@ Flags: `--host 127.0.0.1` · `--http-port 8080` · `--udp-port 5005`
 
 ## Tela 3D
 
-Monitor em tema **branco/preto/vermelho** com vista 3D em canvas (software —
-sem WebGL). Três camadas:
+Dashboard em **tema dark retro** (verde/vermelho/branco, monoespaçado, efeito
+CRT) com vista 3D **WebGL via Three.js vendored** (offline, alta performance;
+voxels instanciados na GPU). O 3D é atualizado a cada **500 ms** a partir dos
+dados vivos. Três camadas:
 
-1. **Ponto WiFi** — halo preto/vermelho que pulsa conforme presença/movimento e
+1. **Ponto WiFi** — halo verde/vermelho que pulsa conforme presença/movimento e
    acelera no modo EXTREMA.
 2. **Planta editável** — paredes e objetos que você adiciona clicando no chão
    (arraste para orbitar, scroll para zoom, botão direito move a câmera).
 3. **Mapa de sombras RF** — o único dado que é o ambiente **real**: aperte
    **"Mapear (sombra RF real)"**, ande pela sala e clique, no chão, onde você
    está. A cada clique a ferramenta grava a atenução atual do WiFi vs. a linha
-   de base ociosa e renderiza colunas vermelhas proporcionais à sombra —
-   móveis e corpos escurecem o enlace e viram volume no 3D.
+   de base ociosa e renderiza um volume de voxels vermelhos proporcional à
+   sombra — móveis e corpos escurecem o enlace e viram volume no 3D.
 
 Honestidade: um único nó CSI **não** triangula obstáculos — a obra 3D é
 varredura de sombras + a planta que você desenha, não reconstrução de objetos.
@@ -116,7 +118,8 @@ src/
   room.js       planta 3D (nós WiFi, obstáculos, validação)
   server.js     UDP + HTTP + SSE
   cli.js        CLI (bin: ruview-sense)
-  monitor.html  página do monitor
-  view3d.js     renderer 3D software (sem WebGL/dependências)
+  monitor.html  página do monitor (tema dark retro)
+  view3d.js     renderer WebGL (Three.js vendored)
+  vendor/       three.module.min.js (r160, MIT, offline)
 test/           node:test
 ```

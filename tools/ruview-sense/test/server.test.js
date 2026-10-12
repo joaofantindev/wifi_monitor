@@ -82,14 +82,19 @@ test("sensitivity toggle sharpens the thresholds", async (t) => {
   assert.equal(normal.thresholds.motion, 0.01);
 });
 
-test("view3d.js is served", async (t) => {
+test("view3d.js and vendored three.js are served", async (t) => {
   const { app, base } = await boot();
   t.after(() => cleanup(app));
-  const res = await fetch(`${base}/view3d.js`);
-  assert.equal(res.status, 200);
-  assert.match(res.headers.get("content-type"), /javascript/);
-  const body = await res.text();
-  assert.match(body, /room-canvas/);
+
+  const v3d = await fetch(`${base}/view3d.js`);
+  assert.equal(v3d.status, 200);
+  assert.match(v3d.headers.get("content-type"), /javascript/);
+  assert.match(await v3d.text(), /room-canvas/);
+
+  const three = await fetch(`${base}/vendor/three.module.min.js`);
+  assert.equal(three.status, 200);
+  const head = await three.text();
+  assert.match(head, /WebGLRenderer/);
 });
 
 test("detection modules can be turned off per signal", async (t) => {

@@ -388,6 +388,17 @@ export function startServer(opts = {}) {
       }
       return;
     }
+    if (url.pathname === "/vendor/three.module.min.js") {
+      try {
+        const js = await readFile(join(HERE, "vendor", "three.module.min.js"));
+        res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
+        res.end(js);
+      } catch {
+        res.writeHead(500);
+        res.end("vendor missing");
+      }
+      return;
+    }
     if (url.pathname === "/view3d.js") {
       try {
         const js = await readFile(join(HERE, "view3d.js"));
