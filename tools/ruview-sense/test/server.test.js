@@ -102,7 +102,7 @@ test("detection modules can be turned off per signal", async (t) => {
   t.after(() => cleanup(app));
 
   const def = await (await fetch(`${base}/api/v1/modules`)).json();
-  assert.deepEqual(def, { presence: true, motion: true, count: true, vitals: true, envChange: true });
+  assert.deepEqual(def, { presence: true, motion: true, count: true, vitals: true, envChange: true, size: true, track: true, radar: true });
 
   const off = await (
     await fetch(`${base}/api/v1/modules`, {
@@ -136,6 +136,100 @@ test("detection modules can be turned off per signal", async (t) => {
     })
   ).json();
   assert.equal(on.count, true);
+});
+
+test("deformation endpoint and size module gating", async (t) => {
+  const { app, base } = await boot();
+  t.after(() => cleanup(app));
+
+  const info = await (await fetch(`${base}/api/v1/deformation`)).json();
+  assert.equal(typeof info.humanDetected, "boolean");
+  assert.ok(info.deformation === null || typeof info.deformation.sizeClass === "string");
+
+  // Disabling the size module zeros the deformation out of the published state.
+  const off = await (
+    await fetch(`${base}/api/v1/modules`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ size: false }),
+    })
+  ).json();
+  assert.equal(off.size, false);
+  const senseOff = await (await fetch(`${base}/api/v1/sense`)).json();
+  assert.equal(senseOff.deformation, null);
+  assert.equal(senseOff.humanDetected, false);
+
+  // Simulated source emits a body-sized deformation once calibrated.
+  await fetch(`${base}/api/v1/modules`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ size: true }),
+  });
+  const deadline = Date.now() + 8000;
+  let sense = await (await fetch(`${base}/api/v1/sense`)).json();
+  while (!sense.humanDetected && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 100));
+    sense = await (await fetch(`${base}/api/v1/sense`)).json();
+  }
+  assert.equal(sense.humanDetected, true, "simulated body should register as human-sized");
+  assert.equal(sense.deformation.sizeClass, "human");
+});
+
+test("humans endpoint reports moving candidates and honours the track module", async (t) => {
+  const { app, base } = await boot();
+  t.after(() => cleanup(app));
+
+  const info = await (await fetch(`${base}/api/v1/humans`)).json();
+  assert.equal(info.grade, "track-heuristic");
+  assert.ok(Array.isArray(info.humans));
+  assert.equal(typeof info.moving, "number");
+
+  // The simulated body walks, so at some point a human track appears.
+  const deadline = Date.now() + 10000;
+  let humans = info;
+  while (humans.humans.length === 0 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 120));
+    humans = await (await fetch(`${base}/api/v1/humans`)).json();
+  }
+  assert.ok(humans.humans.length >= 1, "expected a tracked human candidate");
+  assert.equal(humans.humans[0].grade, "track-heuristic");
+
+  await fetch(`${base}/api/v1/modules`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ track: false }),
+  });
+  const sense = await (await fetch(`${base}/api/v1/sense`)).json();
+  assert.deepEqual(sense.humans, []);
+});
+
+test("radar endpoint reports a delay profile and honours the radar module", async (t) => {
+  const { app, base } = await boot();
+  t.after(() => cleanup(app));
+
+  const info = await (await fetch(`${base}/api/v1/radar`)).json();
+  assert.equal(info.grade, "delay-profile-measured");
+  assert.ok(Array.isArray(info.humans));
+
+  // Once calibrated the simulated CSI carries a delay profile.
+  const deadline = Date.now() + 8000;
+  let radar = info.radar;
+  while (!radar && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 100));
+    radar = (await (await fetch(`${base}/api/v1/radar`)).json()).radar;
+  }
+  assert.ok(radar, "radar should appear after calibration");
+  assert.equal(radar.grade, "delay-profile-measured");
+  assert.equal(radar.rangeGrade, "range-heuristic");
+  assert.ok(radar.profile.length > 0 && radar.rangeM > 0);
+
+  await fetch(`${base}/api/v1/modules`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ radar: false }),
+  });
+  const sense = await (await fetch(`${base}/api/v1/sense`)).json();
+  assert.equal(sense.radar, null);
 });
 
 test("RF shadow map: start/sample/get/demo/out-of-room", async (t) => {

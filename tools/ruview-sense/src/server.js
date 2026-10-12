@@ -21,6 +21,9 @@ const MODULE_DEFAULTS = Object.freeze({
   count: true,
   vitals: true,
   envChange: true,
+  size: true,
+  track: true,
+  radar: true,
 });
 
 // Detection modules shown as toggles in the dashboard. Disabled ones are
@@ -42,6 +45,12 @@ function applyModules(raw, active) {
   }
   if (!active.vitals) out.vitals = null;
   if (!active.envChange) out.environmentChanged = false;
+  if (!active.size) {
+    out.deformation = null;
+    out.humanDetected = false;
+  }
+  if (!active.track) out.humans = [];
+  if (!active.radar) out.radar = null;
   return out;
 }
 
@@ -226,29 +235,30 @@ export function startServer(opts = {}) {
     const period = 24;
     const base = new Float64Array(nSc);
     for (let k = 0; k < nSc; k++) base[k] = 8 + 3 * Math.sin(k / 5);
+    const bodyWidthSc = 6; // gaussian sigma: ~24 active subcarriers = human-sized
     let t = 0;
-    let nextStep = 0;
     simTimer = setInterval(() => {
       t += 1 / 20;
       const cyc = t % period;
-      const occupant = cyc < 14;
-      const walking = (cyc > 4 && cyc < 6) || (cyc > 9 && cyc < 11);
+      const occupant = cyc >= 4 && cyc < 18; // first 4 s empty so calibration is clean
+      const walking = (cyc > 6 && cyc < 8) || (cyc > 11 && cyc < 13);
+      // The body sits on one contiguous band and drifts; walking speeds the drift.
+      const center = occupant ? 32 + 14 * Math.sin(t * (walking ? 1.6 : 0.35)) : -100;
+      const breath = 1.6 * Math.sin(2 * Math.PI * 0.26 * t); // ~15.6 BPM
       const amp = new Float64Array(nSc);
       for (let k = 0; k < nSc; k++) {
         let v = base[k] + (Math.random() - 0.5) * 0.6;
         if (occupant) {
-          v += 5 + 2 * Math.sin(k / 4); // body offset + body shape
-          v += 2.2 * Math.sin(2 * Math.PI * 0.26 * t); // breathing ~15.6 BPM
+          const d = (k - center) / bodyWidthSc;
+          const bump = Math.exp(-0.5 * d * d);
+          v += 10 * bump; // localized body shadow -> bounded span = a sized deformation
+          v += Math.max(0, breath) * bump; // breathing modulates the same band
         }
         amp[k] = Math.max(0.001, v);
       }
-      if (walking && t >= nextStep) {
-        const start = Math.floor(Math.random() * (nSc - 16));
-        const shift = (Math.random() - 0.5) * 7;
-        for (let k = start; k < start + 16; k++) amp[k] = Math.max(0.001, amp[k] + shift);
-        nextStep = t + 0.12;
-      }
-      const frame = { nodeId: 1, rssiDbm: -55, amplitude: amp };
+      // Body blocking the LOS dips the RSSI -> the coarse range estimate moves.
+      const rssi = -55 - (occupant ? 3 + 2 * Math.abs(Math.sin(t * 0.35)) : 0) + (Math.random() - 0.5) * 0.6;
+      const frame = { nodeId: 1, rssiDbm: rssi, amplitude: amp };
       publish(pipeline.ingestCsi(frame));
     }, 50);
     note("simulated CSI source (no hardware)");
@@ -363,6 +373,31 @@ export function startServer(opts = {}) {
     if (url.pathname === "/api/v1/sense") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(last));
+      return;
+    }
+    if (url.pathname === "/api/v1/deformation") {
+      json(res, 200, {
+        humanDetected: last.humanDetected ?? false,
+        deformation: last.deformation ?? null,
+        sensitivity: pipeline.sensitivity,
+      });
+      return;
+    }
+    if (url.pathname === "/api/v1/humans") {
+      json(res, 200, {
+        humans: last.humans ?? [],
+        count: (last.humans ?? []).length,
+        moving: (last.humans ?? []).filter((h) => h.state === "moving").length,
+        grade: "track-heuristic",
+      });
+      return;
+    }
+    if (url.pathname === "/api/v1/radar") {
+      json(res, 200, {
+        radar: last.radar ?? null,
+        humans: last.humans ?? [],
+        grade: "delay-profile-measured",
+      });
       return;
     }
     if (url.pathname === "/events") {

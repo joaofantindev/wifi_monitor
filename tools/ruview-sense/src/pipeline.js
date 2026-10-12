@@ -10,6 +10,10 @@
 //     (device-reported-unvalidated), otherwise a spectral estimate from CSI
 //     amplitude (estimated-heuristic). Never presented as clinical.
 
+import { DeformationEstimator } from "./deform.js";
+import { HumanTracker } from "./tracker.js";
+import { RadarProcessor } from "./radar.js";
+
 const EPS = 1e-9;
 
 function clamp(x, lo, hi) {
@@ -28,6 +32,12 @@ export class SensePipeline {
     this.activeSigma = opts.activeSigma ?? 3;
     this.sensitivity = "normal";
     this.lastRawDelta = 0;
+    this.deform = new DeformationEstimator(opts.deform ?? {});
+    this.tracker = new HumanTracker(opts.tracker ?? {});
+    this.radar = new RadarProcessor(opts.radar ?? {});
+    this.humanDetected = false;
+    this.humans = [];
+    this.radarState = null;
 
     this.stats = new Map(); // key -> { n, mean, m2 }
     this.curMean = new Map(); // key -> { mean } slow EMA, post-calibration
@@ -77,6 +87,7 @@ export class SensePipeline {
       this.baselineAlpha = 0.08;
       this.activeSigma = 2;
       if (this.warmFrames > 20) this.warmFrames = 20;
+      this.deform.setSensitivity("high");
     } else {
       this.sensitivity = "normal";
       this.presenceThreshold = 0.5;
@@ -85,6 +96,7 @@ export class SensePipeline {
       this.motionAlpha = 0.2;
       this.baselineAlpha = 0.02;
       this.activeSigma = 3;
+      this.deform.setSensitivity("normal");
     }
     return this.sensitivity;
   }
@@ -164,6 +176,44 @@ export class SensePipeline {
       this.envChanged = den > 0 && num / den > this.envChangeThreshold;
     }
 
+    // Deformation size: how large is the perturbation the body casts on the
+    // link? Only meaningful once calibrated against the empty-room baseline.
+    let deformation = null;
+    let radar = null;
+    if (this.calibrated && this.refMean) {
+      const bandwidthMhz = frame.flags && frame.flags.bw40 ? 40 : 20;
+      deformation = this.deform.update({
+        amplitude: amp,
+        mu: this.refMean,
+        sd: this.refStd,
+        bandwidthMhz,
+        freqMhz: frame.freqMhz,
+      });
+      // Radar MTI: IFFT of the deviation from the empty-room baseline.
+      const body = new Float64Array(n);
+      for (let k = 0; k < n; k++) body[k] = amp[k] - this.refMean[k];
+      radar = this.radar.update({
+        dev: body,
+        rssiDbm: frame.rssiDbm,
+        bandwidthMhz,
+        subcarrierSpacingMhz: bandwidthMhz / n,
+      });
+    }
+    this.radarState = radar;
+    this.humanDetected = !!(deformation && deformation.humanStable);
+
+    // Track moving human candidates from the transverse position proxy.
+    this.humans = this.tracker.update({
+      t: nowMs,
+      pos: deformation ? deformation.spanCenter : null,
+      humanSized: !!(deformation && deformation.humanSized),
+      humanStable: !!(deformation && deformation.humanStable),
+      sizeClass: deformation ? deformation.sizeClass : null,
+      crossSectionCm: deformation ? deformation.crossSectionCm : null,
+      motion: this.motionEnergy >= this.motionThreshold,
+      presence: this.presenceScore >= this.presenceThreshold,
+    });
+
     // Person count: slot-capacity heuristic over active subcarrier groups.
     const persons = this.#slotCount(active);
 
@@ -180,6 +230,10 @@ export class SensePipeline {
       presenceScore: round(this.presenceScore, 3),
       motion: this.motionEnergy >= this.motionThreshold,
       motionEnergy: round(this.motionEnergy, 4),
+      humanDetected: this.humanDetected,
+      deformation,
+      humans: this.humans,
+      radar,
       persons,
       personsGrade: "slot-capacity-heuristic",
       environmentChanged: this.envChanged,
@@ -225,6 +279,10 @@ export class SensePipeline {
       presenceScore: round(this.presenceScore, 3),
       motion: this.motionEnergy >= this.motionThreshold,
       motionEnergy: round(this.motionEnergy, 4),
+      humanDetected: false,
+      deformation: null,
+      humans: [],
+      radar: null,
       persons: null,
       personsGrade: "unavailable-from-rssi",
       environmentChanged: false,

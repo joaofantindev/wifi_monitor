@@ -73,6 +73,63 @@ test("slot-capacity heuristic reports a person only while a band is active", () 
   assert.equal(seen.personsGrade, "slot-capacity-heuristic");
 });
 
+test("human-sized deformation is detected only for a body-sized perturbation", () => {
+  const p = new SensePipeline({ warmFrames: 30 });
+  feedQuiet(p);
+  // ~26 contiguous active subcarriers: a torso-sized footprint.
+  const body = frame((k) => (k >= 18 && k <= 43 ? 12 : 0));
+  let seen;
+  for (let i = 0; i < 6; i++) seen = p.ingestCsi(body);
+  assert.equal(seen.deformation.sizeClass, "human");
+  assert.equal(seen.humanDetected, true, `crossSection=${seen.deformation.crossSectionCm}`);
+  assert.ok(seen.deformation.crossSectionCm >= 20, `cs=${seen.deformation.crossSectionCm}`);
+
+  // A couple of subcarriers is an object/noise, not a human.
+  const p2 = new SensePipeline({ warmFrames: 30 });
+  feedQuiet(p2);
+  const small = frame((k) => (k === 30 || k === 31 ? 8 : 0));
+  let s2;
+  for (let i = 0; i < 6; i++) s2 = p2.ingestCsi(small);
+  assert.equal(s2.deformation.humanSized, false);
+  assert.equal(s2.humanDetected, false);
+});
+
+test("a walking body becomes a moving human candidate in real time", () => {
+  const p = new SensePipeline({ warmFrames: 30 });
+  feedQuiet(p);
+  let seen;
+  for (let i = 0; i < 24; i++) {
+    const center = 18 + i; // body slides across the subcarriers = walking
+    const body = frame((k) => (Math.abs(k - center) <= 12 ? 10 : 0));
+    seen = p.ingestCsi(body);
+  }
+  assert.ok(seen.humans.length >= 1, `humans=${seen.humans.length}`);
+  assert.equal(seen.humans[0].grade, "track-heuristic");
+  assert.ok(seen.humans[0].confidence > 0.3, `conf=${seen.humans[0].confidence}`);
+  assert.equal(seen.deformation.sizeClass, "human");
+});
+
+test("radar MTI exposes a delay profile and coarse range on CSI", () => {
+  const p = new SensePipeline({ warmFrames: 30 });
+  feedQuiet(p);
+  assert.equal(p.ingestCsi(frame(0)).radar !== null, true);
+  let seen;
+  for (let i = 0; i < 6; i++) {
+    seen = p.ingestCsi(frame((k) => (k >= 20 && k <= 40 ? 10 : 0)));
+  }
+  assert.ok(seen.radar, "radar present");
+  assert.equal(seen.radar.grade, "delay-profile-measured");
+  assert.equal(seen.radar.rangeGrade, "range-heuristic");
+  assert.equal(seen.radar.bearingGrade, "bearing-proxy");
+  assert.ok(seen.radar.profile.length > 0);
+  assert.ok(seen.radar.rangeM > 0 && seen.radar.rangeM <= 12, `rangeM=${seen.radar.rangeM}`);
+});
+
+test("RSSI input has no radar (only CSI carries a delay profile)", () => {
+  const p = new SensePipeline();
+  assert.equal(p.ingestRssi({ rssiDbm: -58 }).radar, null);
+});
+
 test("vitals packet is exposed as device-reported-unvalidated", () => {
   const p = new SensePipeline();
   const v = p.ingestVitals({

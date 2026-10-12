@@ -89,15 +89,34 @@
   <div class="grid">
     <div class="card"><div class="label">Presença</div><div id="presence" class="value">—</div><div class="muted" id="presenceScore"></div></div>
     <div class="card"><div class="label">Movimento</div><div id="motion" class="value">—</div><div class="muted" id="motionEnergy"></div></div>
+    <div class="card"><div class="label">Humanos em movimento</div><div id="humans" class="value">—</div><div class="muted" id="humansGrade"></div></div>
+    <div class="card"><div class="label">Humano (deformidade)</div><div id="human" class="value">—</div><div class="muted" id="humanGrade"></div></div>
+    <div class="card"><div class="label">Tamanho da deformidade</div><div id="size" class="value">—</div><div class="muted" id="sizeClass"></div></div>
     <div class="card"><div class="label">Pessoas (heurística)</div><div id="persons" class="value">—</div><div class="muted" id="personsGrade"></div></div>
     <div class="card"><div class="label">Ambiente</div><div id="env" class="value">—</div><div class="muted">objeto movido/novo? (não classifica)</div></div>
     <div class="card"><div class="label">Respiração (BPM)</div><div id="breathing" class="value">—</div><div class="muted" id="breathingGrade"></div></div>
     <div class="card"><div class="label">Batimentos (BPM)</div><div id="heart" class="value">—</div><div class="muted" id="heartGrade"></div></div>
+    <div class="card"><div class="label">Alcance (radar)</div><div id="range" class="value">—</div><div class="muted" id="rangeGrade"></div></div>
+    <div class="card"><div class="label">Retorno RF</div><div id="ret" class="value">—</div><div class="muted">energia do perfil de atraso</div></div>
     <div class="card"><div class="label">RSSI (dBm)</div><div id="rssi" class="value">—</div></div>
     <div class="card"><div class="label">Frames</div><div id="frames" class="value">0</div></div>
     <div class="card"><div class="label">Mudança bruta RF</div><div id="raw" class="value">—</div><div class="muted">variação do sinal por frame</div></div>
     <div class="card"><div class="label">Sensibilidade</div><div id="sens" class="value">normal</div></div>
   </div>
+
+  <h2>Deformidade do campo RF por subportadora</h2>
+  <canvas id="deform-canvas" width="640" height="90" style="width:100%;height:90px;background:#0c1013;border:1px solid var(--line);border-radius:6px;display:block;margin-bottom:22px"></canvas>
+
+  <h2>Radar / sonar (PPI) — varredura e alvos</h2>
+  <canvas id="radar-scope" width="640" height="300" style="width:100%;height:300px;background:#05070a;border:1px solid var(--line);border-radius:6px;display:block;margin-bottom:8px"></canvas>
+  <div class="muted" style="margin-bottom:22px">
+    anel = alcance (RSSI, <b>heurística</b>) · ângulo = posição 1-D no enlace (<b>proxy</b>, direção ambígua) ·
+    alvos <span style="color:var(--red)">vermelhos</span> = corpos em movimento rastreados
+  </div>
+
+  <h2>Possíveis humanos em movimento (rastreio 1-D do enlace)</h2>
+  <canvas id="track-canvas" width="640" height="130" style="width:100%;height:130px;background:#0c1013;border:1px solid var(--line);border-radius:6px;display:block;margin-bottom:8px"></canvas>
+  <div id="humans-list" class="muted" style="margin-bottom:22px"></div>
 
   <h2>Módulos de detecção</h2>
   <div class="controls" id="modules">
@@ -105,7 +124,7 @@
   </div>
 
   <div class="room3d">
-    <h2>Ambiente 3D (WebGL) — ponto WiFi, planta e sombras RF medidas</h2>
+    <h2>Radar 3D (WebGL) — nuvem de pontos, varredura/sonar e alvos vermelhos</h2>
     <div class="controls">
       <button id="btn-wall">+ parede</button>
       <button id="btn-box">+ objeto</button>
@@ -132,6 +151,9 @@
     const MODULES = [
       ["presence", "presença"],
       ["motion", "movimento"],
+      ["size", "tamanho"],
+      ["track", "humanos"],
+      ["radar", "radar"],
       ["count", "contagem"],
       ["vitals", "vitais"],
       ["envChange", "ambiente"],
@@ -168,6 +190,30 @@
       $("presenceScore").textContent = "score " + fmt(s.presenceScore, 3);
       setVal("motion", s.motion === true ? "SIM" : "NÃO", s.motion === true ? "on" : "");
       $("motionEnergy").textContent = "energia " + fmt(s.motionEnergy, 4);
+      const def = s.deformation;
+      setVal("human", s.humanDetected ? "SIM" : "NÃO", s.humanDetected ? "on" : "");
+      $("humanGrade").innerHTML = badge(def && def.humanStable ? "deformidade humano-tamanho estável" : def ? "deformidade " + def.sizeClass : "sem baseline");
+      if (def) {
+        setVal("size", def.crossSectionCm > 0 ? def.crossSectionCm + " cm" : "—", def.humanSized ? "on" : "");
+        $("sizeClass").innerHTML = badge(def.sizeClass) + " · span " + def.spanSubcarriers + " sc · " + fmt(def.depthDb, 1) + " dB · coh " + fmt(def.coherence, 2);
+      } else {
+        setVal("size", "—", "");
+        $("sizeClass").textContent = "sem baseline calibrado";
+      }
+      drawDeform(def);
+      const humans = Array.isArray(s.humans) ? s.humans : [];
+      const moving = humans.filter((h) => h.state === "moving").length;
+      setVal("humans", String(humans.length), moving > 0 ? "on" : "");
+      $("humansGrade").innerHTML = badge(
+        moving > 0 ? moving + " em movimento · track-heuristic" : humans.length ? "parado(s) · track-heuristic" : "sem candidatos"
+      );
+      drawTracks(humans);
+      renderHumansList(humans);
+      const radar = s.radar;
+      setVal("range", radar && radar.rangeM != null ? fmt(radar.rangeM, 2) + " m" : "—", radar && radar.rangeM != null ? "on" : "");
+      $("rangeGrade").innerHTML = badge(radar ? radar.rangeGrade : null);
+      setVal("ret", radar && radar.returnDb != null ? fmt(radar.returnDb, 1) + " dB" : "—", radar && radar.returnDb > -40 ? "on" : "");
+      drawRadar(s);
       setVal("persons", s.persons ?? "—", s.persons != null ? "on" : "");
       $("personsGrade").innerHTML = badge(s.personsGrade);
       setVal("env", s.environmentChanged ? "MUDOU" : "estável", s.environmentChanged ? "warn" : "");
@@ -191,6 +237,169 @@
       el.className = "value" + (mode ? " " + mode : "");
     }
 
+    const clamp = (x, lo, hi) => (x < lo ? lo : x > hi ? hi : x);
+
+    const rcanvas = $("radar-scope");
+    const RADAR_MAX_M = 5;
+    function drawRadar(s) {
+      const ctx = rcanvas.getContext("2d");
+      const w = rcanvas.width;
+      const h = rcanvas.height;
+      ctx.fillStyle = "#05070a";
+      ctx.fillRect(0, 0, w, h);
+      const cx = w / 2;
+      const cy = h / 2;
+      const R = Math.min(w, h) / 2 - 16;
+      ctx.strokeStyle = "rgba(31,58,36,0.9)";
+      ctx.lineWidth = 1;
+      for (let i = 1; i <= 5; i++) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, (R * i) / 5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.moveTo(cx - R, cy);
+      ctx.lineTo(cx + R, cy);
+      ctx.moveTo(cx, cy - R);
+      ctx.lineTo(cx, cy + R);
+      ctx.stroke();
+      ctx.fillStyle = "#6d7f6d";
+      ctx.font = "10px ui-monospace, monospace";
+      for (let i = 1; i <= 5; i++) ctx.fillText(((RADAR_MAX_M * i) / 5).toFixed(0) + "m", cx + 3, cy - (R * i) / 5 + 11);
+
+      const t = Date.now() / 1000;
+      const sweepAng = ((t * 1.6) % (Math.PI * 2)) - Math.PI / 2;
+      for (let i = 0; i < 22; i++) {
+        const a = sweepAng - i * 0.03;
+        ctx.strokeStyle = `rgba(61,255,110,${0.4 * (1 - i / 22)})`;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R);
+        ctx.stroke();
+      }
+
+      const humans = Array.isArray(s.humans) ? s.humans : [];
+      const radar = s.radar;
+      const rangeM = radar && radar.rangeM != null ? radar.rangeM : 2.4;
+      for (const hu of humans) {
+        const bearing = (clamp(hu.pos, 0, 1) - 0.5) * 2.3; // proxy, radians
+        const a = bearing - Math.PI / 2;
+        const rr = Math.min(1, rangeM / RADAR_MAX_M) * R;
+        const x = cx + Math.sin(a) * rr;
+        const y = cy - Math.cos(a) * rr;
+        const pulse = 7 + 3 * Math.sin(t * 6);
+        ctx.strokeStyle = hu.stale ? "#6d7f6d" : hu.state === "moving" ? "#ff3038" : "#ff8a5a";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x, y, pulse, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.font = "bold 10px ui-monospace, monospace";
+        ctx.fillText("#" + hu.id, x + 9, y - 8);
+      }
+      // node at the centre
+      ctx.fillStyle = "#3dff6e";
+      ctx.beginPath();
+      ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const tcanvas = $("track-canvas");
+    function drawTracks(humans) {
+      const ctx = tcanvas.getContext("2d");
+      const w = tcanvas.width;
+      const h = tcanvas.height;
+      ctx.clearRect(0, 0, w, h);
+      const pad = 16;
+      const laneY = h / 2;
+      ctx.strokeStyle = "rgba(37,51,42,1)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(pad, laneY);
+      ctx.lineTo(w - pad, laneY);
+      ctx.stroke();
+      ctx.fillStyle = "#6d7f6d";
+      ctx.font = "10px ui-monospace, monospace";
+      for (let i = 0; i <= 4; i++) ctx.fillRect(pad + ((w - 2 * pad) * i) / 4, laneY - 4, 1, 8);
+      ctx.fillText("lado A", pad, h - 6);
+      ctx.fillText("lado B", w - pad - 34, h - 6);
+      if (!humans.length) {
+        ctx.fillStyle = "#6d7f6d";
+        ctx.font = "12px ui-monospace, monospace";
+        ctx.fillText("sem humanos rastreados", w / 2 - 78, laneY - 16);
+        return;
+      }
+      for (const hu of humans) {
+        const x = pad + (w - 2 * pad) * clamp(hu.pos, 0, 1);
+        const r = 8 + 8 * hu.confidence;
+        const col = hu.stale
+          ? "rgba(109,127,109,0.6)"
+          : hu.state === "moving"
+          ? "rgba(255,51,51,0.95)"
+          : "rgba(61,255,110,0.9)";
+        ctx.globalAlpha = 0.35;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x, laneY);
+        ctx.lineTo(x - clamp(hu.vel * 40, -60, 60), laneY);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.beginPath();
+        ctx.arc(x, laneY, r, 0, Math.PI * 2);
+        ctx.fillStyle = col;
+        ctx.fill();
+        ctx.fillStyle = "#07090b";
+        ctx.font = "bold 10px ui-monospace, monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(hu.id, x, laneY + 3);
+        ctx.textAlign = "left";
+      }
+    }
+
+    function renderHumansList(humans) {
+      const el = $("humans-list");
+      if (!humans.length) {
+        el.textContent = "Nenhum candidato humano rastreado — precisa de uma deformação humano-tamanho em movimento.";
+        return;
+      }
+      el.innerHTML = humans
+        .map(
+          (hu) =>
+            `#${hu.id} · <b>${hu.state}</b> · conf ${fmt(hu.confidence, 2)} · pos ${fmt(hu.pos, 2)} · ` +
+            `vel ${fmt(hu.vel, 2)} · ${hu.sizeCm ?? "—"} cm (${hu.sizeClass}) · ${(hu.trackedMs / 1000).toFixed(1)}s`
+        )
+        .join("<br>");
+    }
+
+    const dcanvas = $("deform-canvas");
+    function drawDeform(def) {
+      const ctx = dcanvas.getContext("2d");
+      const w = dcanvas.width;
+      const h = dcanvas.height;
+      ctx.clearRect(0, 0, w, h);
+      const profile = def && Array.isArray(def.profile) ? def.profile : [];
+      if (!profile.length) {
+        ctx.fillStyle = "#6d7f6d";
+        ctx.font = "12px ui-monospace, monospace";
+        ctx.fillText("sem perfil (aguardando calibração)", 10, h / 2);
+        return;
+      }
+      const bw = w / profile.length;
+      const human = !!def.humanSized;
+      for (let i = 0; i < profile.length; i++) {
+        const v = Math.max(0, Math.min(1, profile[i]));
+        const bh = v * (h - 12);
+        ctx.fillStyle = human ? "rgba(255,51,51,0.85)" : "rgba(61,255,110,0.7)";
+        ctx.fillRect(i * bw + 0.5, h - bh, Math.max(1, bw - 1), bh);
+      }
+      ctx.strokeStyle = "rgba(109,127,109,0.6)";
+      ctx.beginPath();
+      ctx.moveTo(0, h - (h - 12) / 3);
+      ctx.lineTo(w, h - (h - 12) / 3);
+      ctx.stroke();
+    }
+
     const es = new EventSource("/events");
     es.onmessage = (e) => {
       try { paint(JSON.parse(e.data)); } catch { /* ignore malformed */ }
@@ -200,10 +409,16 @@
 
     $("note").innerHTML =
       "<b class='red'>Leia com honestidade:</b> contagem é <b>heurística</b> (não é contagem real); " +
+      "<b>tamanho da deformidade</b> é <i>estimativa</i> de seção reta pelo modelo da 1ª zona de Fresnel " +
+      "(um objeto movido do mesmo tamanho também lê humano-tamanho; não identifica pessoa); " +
+      "<b>humanos em movimento</b> são <i>candidatos</i> rastreados 1-D pela posição da faixa ativa no enlace " +
+      "(proxy transversal, direção ambígua; um nó não localiza nem separa pessoas no mesmo ponto); " +
       "vitais do ESP32 são <i>device-reported, não validados</i>; RSSI (sem ESP32) só dá presença/movimento grosseiros; " +
       "<b>sombra RF</b> mede atenução real do WiFi vs. linha de base (andar pela sala clicando no chão), mas não identifica objetos — " +
       "um único nó não triangula a posição dos móveis. " +
-      "A vista 3D é WebGL (Three.js): voxels instanciados das sombras RF, atualizada a cada 500 ms."
+      "<b>radar</b>: o perfil de atraso é a IFFT real da onda CSI (MTI cancela o clutter estático), " +
+      "mas 20 MHz não resolvem alcance — a distância vem do RSSI (heurística) e o ângulo é proxy 1-D (direção ambígua). " +
+      "A vista 3D é uma nuvem de mini-pontos brancos com varredura/sonar e alvos vermelhos, atualizada a cada 200 ms."
   </script>
   <script type="module" src="/view3d.js"></script>
 </body>
