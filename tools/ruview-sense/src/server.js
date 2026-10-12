@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { parsePacket } from "./parse.js";
 import { SensePipeline } from "./pipeline.js";
 import { RssiPoller } from "./rssi.js";
+import { DeviceScanner, loadOui } from "./discover.js";
 import { defaultRoom, addObstacle, removeObstacle } from "./room.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -24,6 +25,7 @@ const MODULE_DEFAULTS = Object.freeze({
   size: true,
   track: true,
   radar: true,
+  discover: false, // opt-in: device discovery runs LAN/BLE commands
 });
 
 // Detection modules shown as toggles in the dashboard. Disabled ones are
@@ -77,6 +79,44 @@ export function startServer(opts = {}) {
 
   const pipeline = new SensePipeline(opts.pipeline ?? {});
   let room = defaultRoom();
+
+  // --- Device discovery (opt-in "watch-dogs" map) ---
+  const scanner = opts.scanner ?? new DeviceScanner({ subnet: opts.subnet ?? null, ...(opts.discover ?? {}) });
+  if (!opts.scanner && !scanner.oui) {
+    loadOui()
+      .then((t) => {
+        if (!scanner.oui) scanner.oui = t;
+      })
+      .catch(() => {});
+  }
+  const discoverIntervalMs = opts.discoverIntervalMs ?? 60000;
+  let devicesState = { ts: null, devices: [], count: 0, grade: "device-discovery", rttGrade: "latency-proxy", scanning: false };
+  let discoveryTimer = null;
+  let scanning = false;
+
+  async function runScan() {
+    if (scanning) return devicesState;
+    scanning = true;
+    try {
+      const res = await scanner.scan();
+      devicesState = { ...res, scanning: false };
+    } catch (err) {
+      devicesState = { ...devicesState, scanning: false, error: err.message };
+    } finally {
+      scanning = false;
+    }
+    return devicesState;
+  }
+  function startDiscovery() {
+    if (discoveryTimer) return;
+    runScan();
+    discoveryTimer = setInterval(runScan, discoverIntervalMs);
+    note("discovery: mapeando dispositivos na rede (leitura apenas)");
+  }
+  function stopDiscovery() {
+    if (discoveryTimer) clearInterval(discoveryTimer);
+    discoveryTimer = null;
+  }
 
   // Per-server RF shadow map session (startServer is reusable in tests).
   const mapSession = {
@@ -327,9 +367,25 @@ export function startServer(opts = {}) {
         } catch {
           /* malformed JSON: keep current modules */
         }
+        if (activeModules.discover) startDiscovery();
+        else stopDiscovery();
         publish({});
       }
       json(res, 200, { ...last.modules });
+      return;
+    }
+    if (url.pathname === "/api/v1/devices") {
+      if (req.method === "POST" || url.searchParams.get("scan") === "1") {
+        const state = await runScan();
+        json(res, 200, state);
+        return;
+      }
+      json(res, 200, devicesState);
+      return;
+    }
+    if (url.pathname === "/api/v1/devices/scan" && req.method === "POST") {
+      const state = await runScan();
+      json(res, 200, state);
       return;
     }
     if (url.pathname === "/api/v1/map") {
@@ -463,6 +519,7 @@ export function startServer(opts = {}) {
     if (udp) udp.close();
     if (rssiPoller) rssiPoller.stop();
     if (simTimer) clearInterval(simTimer);
+    stopDiscovery();
     clearInterval(broadcast);
     server.close();
   }

@@ -102,7 +102,7 @@ test("detection modules can be turned off per signal", async (t) => {
   t.after(() => cleanup(app));
 
   const def = await (await fetch(`${base}/api/v1/modules`)).json();
-  assert.deepEqual(def, { presence: true, motion: true, count: true, vitals: true, envChange: true, size: true, track: true, radar: true });
+  assert.deepEqual(def, { presence: true, motion: true, count: true, vitals: true, envChange: true, size: true, track: true, radar: true, discover: false });
 
   const off = await (
     await fetch(`${base}/api/v1/modules`, {
@@ -230,6 +230,38 @@ test("radar endpoint reports a delay profile and honours the radar module", asyn
   });
   const sense = await (await fetch(`${base}/api/v1/sense`)).json();
   assert.equal(sense.radar, null);
+});
+
+test("device discovery endpoint returns scanned devices (injected scanner)", async (t) => {
+  const fake = {
+    scan: async () => ({
+      ts: 1,
+      count: 2,
+      grade: "device-discovery",
+      rttGrade: "latency-proxy",
+      devices: [
+        { ip: "192.168.2.1", kind: "lan", mac: "14:36:0E:70:6E:00", vendor: "Zyxel Communications", online: true, rttMs: 2.1, score: 0 },
+        { ip: "192.168.2.189", kind: "lan", mac: "CC:A1:2B:3D:EE:F0", online: true, rttMs: 1.2 },
+      ],
+    }),
+  };
+  const app = startServer({ source: "simulated", httpPort: 0, log: false, scanner: fake });
+  await new Promise((resolve) => app.server.once("listening", resolve));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  t.after(() => cleanup(app));
+
+  const info = await (await fetch(`${base}/api/v1/devices`)).json();
+  assert.equal(info.grade, "device-discovery");
+  assert.deepEqual(info.devices, []);
+
+  const scanned = await (await fetch(`${base}/api/v1/devices/scan`, { method: "POST" })).json();
+  assert.equal(scanned.count, 2);
+  assert.equal(scanned.rttGrade, "latency-proxy");
+  assert.equal(scanned.devices[0].vendor, "Zyxel Communications");
+
+  // The last scan is cached for the GET endpoint.
+  const cached = await (await fetch(`${base}/api/v1/devices`)).json();
+  assert.equal(cached.count, 2);
 });
 
 test("RF shadow map: start/sample/get/demo/out-of-room", async (t) => {
